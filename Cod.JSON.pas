@@ -372,6 +372,69 @@ begin
   end;
 end;
 
+function JSONStringToStringValue(const JSONStr: string): string;
+var
+  I, Len: Integer;
+  Ch: Char;
+  SB: TStringBuilder;
+  UnicodeHex: string;
+  UnicodeVal: Integer;
+begin
+  if (JSONStr = '') or (JSONStr[1] <> '"') or (JSONStr[Length(JSONStr)] <> '"') then
+    raise Exception.Create('Invalid JSON string literal');
+
+  SB := TStringBuilder.Create;
+  try
+    I := 2; // Skip initial quote
+    Len := Length(JSONStr);
+
+    while I < Len do
+    begin
+      Ch := JSONStr[I];
+
+      if Ch = '\' then
+      begin
+        Inc(I);
+        if I >= Len then
+          raise Exception.Create('Invalid escape sequence in JSON string');
+
+        case JSONStr[I] of
+          '"': SB.Append('"');
+          '\': SB.Append('\');
+          '/': SB.Append('/');
+          'b': SB.Append(#8);
+          'f': SB.Append(#12);
+          'n': SB.Append(#10);
+          'r': SB.Append(#13);
+          't': SB.Append(#9);
+          'u':
+            begin
+              if I + 4 >= Len then
+                raise Exception.Create('Incomplete \u escape in JSON string');
+
+              UnicodeHex := Copy(JSONStr, I + 1, 4);
+              if not TryStrToInt('$' + UnicodeHex, UnicodeVal) then
+                raise Exception.Create('Invalid \uXXXX escape in JSON string');
+
+              SB.Append(Char(UnicodeVal));
+              Inc(I, 4); // skip the next 4 digits
+            end;
+        else
+          raise Exception.CreateFmt('Unknown escape sequence: \%s', [JSONStr[I]]);
+        end;
+      end
+      else
+        SB.Append(Ch);
+
+      Inc(I);
+    end;
+
+    Result := SB.ToString;
+  finally
+    SB.Free;
+  end;
+end;
+
 { TJValue }
 
 function TJValue.AsArray: IJArray;
@@ -496,7 +559,7 @@ begin
 
   // String
   if (Length(S) >= 2) and (S[1] = '"') and (S[Length(S)] = '"') then
-    Exit(TJString.Create( System.Copy(S, 2, Length(S)-2) ));
+    Exit(TJString.Create( JSONStringToStringValue(S) ));
 
   // Boolean
   if SameText(S, 'true') then
