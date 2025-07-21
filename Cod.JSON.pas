@@ -260,6 +260,9 @@ type
 
     function Copy: IJValue; override;
     function ToJSON: string; override;
+
+    // Constructor 2
+    class function CreateNew(Value: string): TJString; static;
   end;
 
   // V*Integer / Int64
@@ -274,6 +277,9 @@ type
 
     function Copy: IJValue; override;
     function ToJSON: string; override;
+
+    // Constructor 2
+    class function CreateNew(Value: string): TJInteger; static;
   end;
 
   // V*Float
@@ -288,6 +294,9 @@ type
 
     function Copy: IJValue; override;
     function ToJSON: string; override;
+
+    // Constructor 2
+    class function CreateNew(Value: string): TJFloat; static;
   end;
 
   // V*Boolean
@@ -302,6 +311,9 @@ type
 
     function Copy: IJValue; override;
     function ToJSON: string; override;
+
+    // Constructor 2
+    class function CreateNew(Value: string): TJBoolean; static;
   end;
 
 // Functions
@@ -1093,6 +1105,11 @@ begin
   inherited Create;
 end;
 
+class function TJString.CreateNew(Value: string): TJString;
+begin
+  Result := TJValue.CreateNew(Value) as TJString;
+end;
+
 function TJString.IsString: Boolean;
 begin
   Result := true;
@@ -1119,6 +1136,11 @@ constructor TJInteger.Create(Value: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF
 begin
   FValue := Value;
   inherited Create;
+end;
+
+class function TJInteger.CreateNew(Value: string): TJInteger;
+begin
+  Result := TJValue.CreateNew(Value) as TJInteger;
 end;
 
 function TJInteger.IsInteger: Boolean;
@@ -1149,6 +1171,11 @@ begin
   inherited Create;
 end;
 
+class function TJFloat.CreateNew(Value: string): TJFloat;
+begin
+  Result := TJValue.CreateNew(Value) as TJFloat;
+end;
+
 function TJFloat.IsFloat: Boolean;
 begin
   Result := true;
@@ -1175,6 +1202,11 @@ constructor TJBoolean.Create(Value: Boolean);
 begin
   FValue := Value;
   inherited Create;
+end;
+
+class function TJBoolean.CreateNew(Value: string): TJBoolean;
+begin
+  Result := TJValue.CreateNew(Value) as TJBoolean;
 end;
 
 function TJBoolean.IsBoolean: Boolean;
