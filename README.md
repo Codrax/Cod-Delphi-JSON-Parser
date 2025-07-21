@@ -2,7 +2,7 @@
 An easier refrence-count based JSON parser and reader for Delphi.
 
 ## Important notes
-Do ***NOT*** use `<class-name>.Create()` unless you are planning to free the memory yourself. That creates a managed instance of the class object which *you* have to free. The **correct** way to create any values is with `<class-name>.CreateNew()`.
+Do ***NOT*** use `<class-name>.Create()` unless you are planning to free the memory yourself. That creates a managed instance of the class object which *you* have to free. The **correct** way to create any value is with `<class-name>.CreateNew()`.
 
 Examples:
 Create object/array
