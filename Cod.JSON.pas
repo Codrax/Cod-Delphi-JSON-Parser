@@ -909,7 +909,7 @@ var
   Obj: TPair;
   InsertIndex: integer;
 begin
-  const NewCopy = Value.Copy; const P = NewCopy._AddRef; // create reference
+  const NewCopy = Value.Copy; NewCopy._AddRef; // create reference
 
   Obj.Key := Key;
   Obj.Item := NewCopy;
