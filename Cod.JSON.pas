@@ -9,11 +9,14 @@
 {            Copyright (c) 2025 Codrut Software.            }
 {***********************************************************}
 
+{$DEFINE LARGEJNUM}
+
 unit Cod.JSON;
 
 interface
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes, IOUTils;
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes, IOUTils,
+  System.Generics.Collections;
 
 const
   DEFAULT_IDENT = 4;
@@ -29,7 +32,7 @@ type
     function AsObject: IJObject;
     function AsArray: IJArray;
     function AsString: string;
-    function AsInteger: Integer;
+    function AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF};
     function AsBoolean: Boolean;
     function AsFloat: Extended;
 
@@ -117,7 +120,7 @@ type
     function AsObject: IJObject; virtual;
     function AsArray: IJArray; virtual;
     function AsString: string; virtual;
-    function AsInteger: Integer; virtual;
+    function AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF}; virtual;
     function AsFloat: Extended; virtual;
     function AsBoolean: Boolean; virtual;
 
@@ -150,15 +153,14 @@ type
   // V*Object
   TJObject = class(TJValue, IJObject)
   private
-    FList: TList;
     type TPair = record
         Key: string;
         Item: IJValue;
       end;
-      TPairP = ^TPair;
+    var FList: TList<TPair>;
 
   protected
-    procedure _addKey(Key: string; Value: IJValue);
+    procedure _addKey(Key: string; const Value: IJValue);
 
   public
     constructor Create;
@@ -260,14 +262,14 @@ type
     function ToJSON: string; override;
   end;
 
-  // V*Integer
+  // V*Integer / Int64
   TJInteger = class(TJValue)
   private
-    FValue: Integer;
+    FValue: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF};
   public
-    constructor Create(Value: Integer);
+    constructor Create(Value: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF});
 
-    function AsInteger: Integer; override;
+    function AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF}; override;
     function IsInteger: Boolean; override;
 
     function Copy: IJValue; override;
@@ -452,7 +454,7 @@ begin
   raise TEJIncorrectJValueType.Create('JValue is not of [FLOAT] type.');
 end;
 
-function TJValue.AsInteger: Integer;
+function TJValue.AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF};
 begin
   raise TEJIncorrectJValueType.Create('JValue is not of [INTEGER] type.');
 end;
@@ -740,9 +742,8 @@ var
 begin
   // Free list records
   for I := 0 to Count-1 do begin
-    TPairP(FList[I])^.Item._Release; // release reference
-
-    FreeMem(FList[I], SizeOf(TPair));
+    FList[I].Item._Release; // release reference
+    FList.List[I].Item := nil;
   end;
 
   FList.Clear;
@@ -751,21 +752,15 @@ end;
 function TJObject.Copy: IJValue;
 var
   I: integer;
-  Obj: TPairP;
 begin
   Result := TJObject.Create;
 
+  TJObject(Result).FList.Count := FList.Count;
   for I := 0 to Count-1 do begin
-    // Allocate clone item
-    Obj := AllocMem(SizeOf(TPair));
+    const NewCopy = FList[I].Item.Copy; NewCopy._AddRef; // create reference
 
-    const NewCopy = TPairP(FList[I])^.Item.Copy; NewCopy._AddRef; // create reference
-
-    Obj.Key := TPairP(FList[I])^.Key;
-    Obj.Item := NewCopy;
-
-    // Append
-    TJObject(Result).FList.Add( Obj );
+    TJObject(Result).FList.List[I].Key := FList[I].Key;
+    TJObject(Result).FList.List[I].Item := NewCopy;
   end;
 end;
 
@@ -778,7 +773,7 @@ constructor TJObject.Create;
 begin
   inherited Create;
 
-  FList := TList.Create;
+  FList := TList<TPair>.Create;
 end;
 
 class function TJObject.CreateNew: IJObject;
@@ -806,7 +801,7 @@ begin
   SetLength(Items, Count);
   for I := 0 to Count-1 do
     Items[I] := CreateIdent(BaseIdent+Indentation)
-      +StringValueToJSONString(TPairP(FList[I])^.Key)+': '+TPairP(FList[I])^.Item.Format(Indentation, BaseIdent+Indentation);
+      +StringValueToJSONString(FList[I].Key)+': '+FList[I].Item.Format(Indentation, BaseIdent+Indentation);
 
   Content := '';
   if Length(Items) > 0 then
@@ -818,17 +813,17 @@ end;
 
 function TJObject.Get(Index: Integer): IJValue;
 begin
-  Result := TPairP(FList[Index])^.Item.Copy;
+  Result := FList[Index].Item.Copy;
 end;
 
 function TJObject.Get(Key: string): IJValue;
 begin
-  Result := TPairP(FList[GetKeyIndex(Key)])^.Item.Copy;
+  Result := FList[GetKeyIndex(Key)].Item.Copy;
 end;
 
 function TJObject.GetItemKey(Index: Integer): string;
 begin
-  Result := TPairP(FList[Index])^.Key;
+  Result := FList[Index].Key;
 end;
 
 function TJObject.GetKeyIndex(Key: string): Integer;
@@ -836,7 +831,7 @@ var
   I: Integer;
 begin
   for I := 0 to Count-1 do
-    if Key = TPairP(FList[I])^.Key then
+    if Key = FList[I].Key then
       Exit(I);
   Exit(-1);
 end;
@@ -864,10 +859,10 @@ end;
 
 procedure TJObject.Put(Index: Integer; const Value: IJValue);
 begin
-  TPairP(FList[Index])^.Item._Release; // release reference
+  FList[Index].Item._Release; // release reference
   const NewCopy = Value.Copy; NewCopy._AddRef; // create reference
 
-  TPairP(FList[Index])^.Item := NewCopy;
+  FList.List[Index].Item := NewCopy;
 end;
 
 procedure TJObject.Remove(Key: string);
@@ -878,10 +873,8 @@ end;
 procedure TJObject.Remove(Index: integer);
 begin
   if (Index >= 0) and (Index < FList.Count) then begin
-    TPairP(FList[Index])^.Item._Release; // release reference
-
-    // Free memory
-    FreeMem(FList[Index], SizeOf(TPair));
+    FList[Index].Item._Release; // release reference
+    FList.List[Index].Item := nil;
   end;
 
   // Delete
@@ -895,30 +888,32 @@ var
 begin
   SetLength(Items, Count);
   for I := 0 to Count-1 do
-    Items[I] := StringValueToJSONString(TPairP(FList[I])^.Key)+':'+TPairP(FList[I])^.Item.ToJSON;
+    Items[I] := StringValueToJSONString(FList[I].Key)+':'+FList[I].Item.ToJSON;
   Result := '{'+string.Join(',', Items)+'}';
 end;
 
-procedure TJObject._addKey(Key: string; Value: IJValue);
+procedure TJObject._addKey(Key: string; const Value: IJValue);
 var
-  Obj: TPairP;
+  Obj: TPair;
   InsertIndex: integer;
 begin
-  const NewCopy = Value.Copy; NewCopy._AddRef; // create reference
-
-  Obj := AllocMem(SizeOf(TPair));
+  const NewCopy = Value.Copy; const P = NewCopy._AddRef; // create reference
 
   Obj.Key := Key;
   Obj.Item := NewCopy;
 
-  // Get insert index
-  InsertIndex := FList.Count;
-  while (InsertIndex > 0)
-    and (Obj.Key < TPairP(FList[InsertIndex-1])^.Key) do
-      Dec(InsertIndex);
+  try
+    // Get insert index
+    InsertIndex := FList.Count;
+    while (InsertIndex > 0)
+      and (Obj.Key < FList[InsertIndex-1].Key) do
+        Dec(InsertIndex);
 
-  // Insert object
-  FList.Insert(InsertIndex, Obj);
+    // Insert object
+    FList.Insert(InsertIndex, Obj);
+  finally
+    Obj.Item := nil;
+  end;
 end;
 
 constructor TJArray.Create;
@@ -976,16 +971,28 @@ begin
 end;
 
 procedure TJArray.Add(Value: Boolean);
-begin Add( TJValue.CreateNew(Value) ); end;
+begin
+  const NewCopy = TJValue.CreateNew(Value); NewCopy._AddRef; // create reference
+  FList.Add( NewCopy );
+end;
 
 procedure TJArray.Add(Value: Extended);
-begin Add( TJValue.CreateNew(Value) ); end;
+begin
+  const NewCopy = TJValue.CreateNew(Value); NewCopy._AddRef; // create reference
+  FList.Add( NewCopy );
+end;
 
 procedure TJArray.Add(Value: Integer);
-begin Add( TJValue.CreateNew(Value) ); end;
+begin
+  const NewCopy = TJValue.CreateNew(Value); NewCopy._AddRef; // create reference
+  FList.Add( NewCopy );
+end;
 
 procedure TJArray.Add(Value: string);
-begin Add( TJValue.CreateNew(Value) ); end;
+begin
+  const NewCopy = TJValue.CreateNew(Value); NewCopy._AddRef; // create reference
+  FList.Add( NewCopy );
+end;
 
 function TJArray.AsArray: IJArray;
 begin
@@ -1026,6 +1033,11 @@ end;
 
 procedure TJArray.Clear;
 begin
+  // release reference(s)
+  for var I := 0 to FList.Count-1 do
+    IJValue(FList[I])._Release;
+
+  // Clear list
   FList.Clear;
 end;
 
@@ -1093,7 +1105,7 @@ end;
 
 { TJInteger }
 
-function TJInteger.AsInteger: Integer;
+function TJInteger.AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF};
 begin
   Result := FValue;
 end;
@@ -1103,7 +1115,7 @@ begin
   Result := TJInteger.Create(FValue);
 end;
 
-constructor TJInteger.Create(Value: Integer);
+constructor TJInteger.Create(Value: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF});
 begin
   FValue := Value;
   inherited Create;
