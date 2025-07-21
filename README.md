@@ -12,10 +12,20 @@ TJArray.CreateNew;
 ```
 Create other value types
 ```
-TJValue.CreateNew('hello world') or TJString.CreateNew('hello world')
-TJValue.CreateNew(true) or TJBoolean.CreateNew(true)
-TJValue.CreateNew(10) or TJInteger.CreateNew(10)
-TJValue.CreateNew(3.14) or TJFloat.CreateNew(3.14)
+TJValue.CreateNew('hello world')
+or
+TJString.CreateNew('hello world')
+
+TJValue.CreateNew(true)
+or
+TJBoolean.CreateNew(true)
+
+TJValue.CreateNew(10)
+or
+TJInteger.CreateNew(10)
+TJValue.CreateNew(3.14)
+or
+TJFloat.CreateNew(3.14)
 ```
 
 ## Examples
