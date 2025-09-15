@@ -69,6 +69,8 @@ type
 
     function Get(Index: Integer): IJValue; overload;
     function Get(Key: string): IJValue; overload;
+    function GetMemory(Index: Integer): IJValue; overload;
+    function GetMemory(Key: string): IJValue; overload;
     procedure Put(Index: Integer; const Value: IJValue); overload;
       procedure Put(Index: Integer; Value: string); overload;
       procedure Put(Index: Integer; Value: Integer); overload;
@@ -84,6 +86,7 @@ type
     procedure Rename(Key: string; NewName: string);
 
     property Items[Key: string]: IJValue read Get write Put; default;
+    property Memory[Key: string]: IJValue read GetMemory;
 
     function Count: Integer;
 
@@ -98,6 +101,7 @@ type
     procedure ForEach(Callback: TIJArrayForEach);
 
     function Get(Index: Integer): IJValue;
+    function GetMemory(Index: Integer): IJValue;
     procedure Put(Index: Integer; const Value: IJValue);
     procedure Remove(Index: Integer);
 
@@ -115,6 +119,7 @@ type
       procedure Insert(Index: Integer; Value: Boolean); overload;
 
     property Items[Index: Integer]: IJValue read Get write Put; default;
+    property Memory[Key: Integer]: IJValue read GetMemory;
   end;
 
   // [Classes]
@@ -213,6 +218,8 @@ type
 
     function Get(Index: Integer): IJValue; overload;
     function Get(Key: string): IJValue; overload;
+    function GetMemory(Index: Integer): IJValue; overload;
+    function GetMemory(Key: string): IJValue; overload;
     procedure Put(Index: Integer; const Value: IJValue); overload;
       procedure Put(Index: Integer; Value: string); overload;
       procedure Put(Index: Integer; Value: Integer); overload;
@@ -228,6 +235,7 @@ type
     procedure Rename(Key: string; NewName: string);
 
     property Items[Key: string]: IJValue read Get write Put; default;
+    property Memory[Key: string]: IJValue read GetMemory;
 
     function Count: Integer;
 
@@ -261,6 +269,7 @@ type
 
     // List
     function Get(Index: Integer): IJValue;
+    function GetMemory(Index: Integer): IJValue;
     procedure Put(Index: Integer; const Value: IJValue);
     procedure Remove(Index: Integer);
 
@@ -278,6 +287,7 @@ type
       procedure Insert(Index: Integer; Value: Boolean); overload;
 
     property Items[Index: Integer]: IJValue read Get write Put; default;
+    property Memory[Key: Integer]: IJValue read GetMemory;
 
     // Constructor 2
     class function CreateNew: IJArray; static;
@@ -361,6 +371,8 @@ function StringToJValue(Json: string): IJValue;
 type
   TEJIncorrectJValueType = type Exception;
   TEJInvalidJsonFormat = type Exception;
+  TEJObjectKeyDoesNotExists = type Exception;
+  TEJKeyAllreadyExists = type Exception;
 
 implementation
 
@@ -909,7 +921,7 @@ begin
   Content := '';
   if Length(Items) > 0 then
     Content := #13+string.Join(','#13, Items)+#13;
-  Result := CreateIdent(BaseIdent)+'{'
+  Result := (*CreateIdent(BaseIdent)+*)'{'
     +Content
     +CreateIdent(BaseIdent)+'}';
 end;
@@ -956,6 +968,16 @@ begin
         Exit;
     Result := -1;
   end;
+end;
+
+function TJObject.GetMemory(Key: string): IJValue;
+begin
+  Result := FList[GetKeyIndex(Key)].Item;
+end;
+
+function TJObject.GetMemory(Index: Integer): IJValue;
+begin
+  Result := FList[Index].Item;
 end;
 
 function TJObject.GetSorted: boolean;
@@ -1013,11 +1035,15 @@ procedure TJObject.Rename(Key, NewName: string);
 var
   SourceIndex: integer;
 begin
+  if Key = NewName then
+    Exit;
   if KeyExists(NewName) then
-    raise Exception.CreateFmt('A key with the name "%s" already exists.', [NewName]);
+    raise TEJKeyAllreadyExists.CreateFmt('A key with the name "%s" already exists.', [NewName]);
 
   // Get key
   SourceIndex := GetKeyIndex(Key);
+  if SourceIndex = -1 then
+    raise TEJObjectKeyDoesNotExists.CreateFmt('There is no key with the name name "%s".', [Key]);
   FList.List[SourceIndex].Key := NewName;
 
   if FSortedKeys then begin
@@ -1144,7 +1170,7 @@ begin
   Content := '';
   if Length(Items) > 0 then
     Content := #13+string.Join(','#13, Items)+#13;
-  Result := CreateIdent(BaseIdent)+'['
+  Result := (*CreateIdent(BaseIdent)+*)'['
     +Content
     +CreateIdent(BaseIdent)+']';
 end;
@@ -1152,6 +1178,11 @@ end;
 function TJArray.Get(Index: Integer): IJValue;
 begin
   Result := IJValue(FList[Index]).Copy;
+end;
+
+function TJArray.GetMemory(Index: Integer): IJValue;
+begin
+  Result := IJValue(FList[Index]);
 end;
 
 procedure TJArray.Add(Value: IJValue);
