@@ -10,13 +10,14 @@
 {***********************************************************}
 
 {$DEFINE LARGEJNUM}
+{$SCOPEDENUMS ON}
 
 unit Cod.JSON;
 
 interface
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes, IOUTils,
-  System.Generics.Collections;
+  System.SysUtils, System.Classes, IOUtils, {$IFDEF MSWINDOWS}Windows,{$ENDIF}
+  System.Generics.Collections, System.Generics.Defaults;
 
 const
   DEFAULT_IDENT = 4;
@@ -26,6 +27,9 @@ type
   IJValue = interface;
   IJObject = interface;
   IJArray = interface;
+
+  TIJObjectForEach = reference to procedure (Key: string; Item: IJValue);
+  TIJArrayForEach = reference to procedure (Item: IJValue);
 
   IJValue = interface(IInterface)
     ['{b1327b67-c9aa-4d5a-8049-397b7634dd62}']
@@ -50,12 +54,18 @@ type
 
   IJObject = interface(IJValue)
     ['{fbddbaa5-cc22-4b15-b9bd-3a92ce1aa016}']
+    function GetSorted: boolean;
+    procedure SetSorted(const Value: boolean);
+
     procedure Clear;
+
+    procedure ForEach(Callback: TIJObjectForEach);
 
     function GetItemKey(Index: Integer): string;
     function GetKeyIndex(Key: string): Integer;
 
-    function KeyExists(Key: string): boolean;
+    function KeyExists(Key: string): boolean; overload;
+    function KeyExists(Key: string; out Value: IJValue): boolean; overload;
 
     function Get(Index: Integer): IJValue; overload;
     function Get(Key: string): IJValue; overload;
@@ -71,15 +81,21 @@ type
       procedure Put(Key: string; Value: Boolean); overload;
     procedure Remove(Index: Integer); overload;
     procedure Remove(Key: string); overload;
+    procedure Rename(Key: string; NewName: string);
 
     property Items[Key: string]: IJValue read Get write Put; default;
 
     function Count: Integer;
+
+    procedure Sort;
+    property Sorted: boolean read GetSorted write SetSorted;
   end;
 
   IJArray = interface(IJValue)
     ['{dfc7c578-7bda-4a9f-b5f0-503d34e0c20c}']
     procedure Clear;
+
+    procedure ForEach(Callback: TIJArrayForEach);
 
     function Get(Index: Integer): IJValue;
     procedure Put(Index: Integer; const Value: IJValue);
@@ -111,6 +127,9 @@ type
   TJFloat = class;
   TJBoolean = class;
 
+  TJValueWriteToFileFlag = (FlushFileToDisk, PrettyPrint);
+  TJValueWriteToFileFlags = set of TJValueWriteToFileFlag;
+
   // Main value
   TJValue = class(TInterfacedObject, IJValue) {By default, this represents the null class}
   public
@@ -137,6 +156,9 @@ type
     function ToJSON: string; virtual;
     function Format(Indentation: Integer=DEFAULT_IDENT; BaseIdent: Integer=0): string; virtual;
 
+    class procedure SaveToFile(Value: IJValue; FilePath: string; Flags: TJValueWriteToFileFlags); static;
+    class function LoadFromFile(FilePath: string): IJValue; static;
+
     // Constructor 2
     class function CreateNew: IJValue; overload; static; // null
     class function CreateNew(Value: string): IJValue; overload; static;
@@ -158,6 +180,7 @@ type
         Item: IJValue;
       end;
     var FList: TList<TPair>;
+    FSortedKeys: boolean;
 
   protected
     procedure _addKey(Key: string; const Value: IJValue);
@@ -166,7 +189,12 @@ type
     constructor Create;
     destructor Destroy; override;
 
+    function GetSorted: boolean;
+    procedure SetSorted(const Value: boolean);
+
     procedure Clear;
+
+    procedure ForEach(Callback: TIJObjectForEach);
 
     // Value
     function AsObject: IJObject; override;
@@ -180,7 +208,8 @@ type
     function GetItemKey(Index: Integer): string;
     function GetKeyIndex(Key: string): Integer;
 
-    function KeyExists(Key: string): boolean;
+    function KeyExists(Key: string): boolean; overload;
+    function KeyExists(Key: string; out Value: IJValue): boolean; overload;
 
     function Get(Index: Integer): IJValue; overload;
     function Get(Key: string): IJValue; overload;
@@ -196,10 +225,14 @@ type
       procedure Put(Key: string; Value: Boolean); overload;
     procedure Remove(Index: Integer); overload;
     procedure Remove(Key: string); overload;
+    procedure Rename(Key: string; NewName: string);
 
     property Items[Key: string]: IJValue read Get write Put; default;
 
     function Count: Integer;
+
+    procedure Sort;
+    property Sorted: boolean read GetSorted write SetSorted;
 
     // Constructor 2
     class function CreateNew: IJObject; static;
@@ -215,6 +248,8 @@ type
     destructor Destroy; override;
 
     procedure Clear;
+
+    procedure ForEach(Callback: TIJArrayForEach);
 
     // Value
     function AsArray: IJArray; override;
@@ -274,6 +309,10 @@ type
 
     function AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF}; override;
     function IsInteger: Boolean; override;
+
+    // Also is float
+    function AsFloat: Extended; override;
+    function IsFloat: Boolean; override;
 
     function Copy: IJValue; override;
     function ToJSON: string; override;
@@ -561,6 +600,47 @@ begin
   Result := false;
 end;
 
+class function TJValue.LoadFromFile(FilePath: string): IJValue;
+begin
+  Result := TJValue.ParseJson(TFile.ReadAllText(FilePath, TEncoding.UTF8));
+end;
+
+class procedure TJValue.SaveToFile(Value: IJValue; FilePath: string; Flags: TJValueWriteToFileFlags);
+var
+  Contents: string;
+  {$IFDEF MSWINDOWS}
+  LFileStream: TFileStream;
+  Buff: TBytes;
+  {$ENDIF}
+begin
+  if TJValueWriteToFileFlag.PrettyPrint in Flags then
+    Contents := Value.Format()
+  else
+    Contents := Value.ToJSON;
+  {$IFDEF MSWINDOWS}
+  LFileStream := nil;
+  try
+    LFileStream := TFile.Create(FilePath);
+    // Write BOM encoding prefix
+      Buff := TEncoding.UTF8.GetPreamble;
+      LFileStream.WriteBuffer(Buff, Length(Buff));
+    //
+    Buff := TEncoding.UTF8.GetBytes( Contents );
+    LFileStream.WriteBuffer(Buff, Length(Buff));
+
+    if TJValueWriteToFileFlag.FlushFileToDisk in Flags then begin
+      // Force OS flush to disk
+      if not FlushFileBuffers(LFileStream.Handle) then
+        RaiseLastOSError;
+    end;
+  finally
+    LFileStream.Free;
+  end;
+{$ELSE}
+TFile.WriteAllText(FilePath, Contents, TEncoding.UTF8);
+{$ENDIF}
+end;
+
 class function TJValue.ParseJson(Source: string): IJValue;
 var
   S: string;
@@ -785,7 +865,12 @@ constructor TJObject.Create;
 begin
   inherited Create;
 
-  FList := TList<TPair>.Create;
+  FList := TList<TPair>.Create(TComparer<TPair>.Construct(
+    function(const Left, Right: TPair): Integer
+    begin
+      Result := TComparer<string>.Default.Compare(Left.Key, Right.Key);
+    end
+  ));
 end;
 
 class function TJObject.CreateNew: IJObject;
@@ -802,6 +887,12 @@ begin
   FreeAndNil(FList);
 
   inherited;
+end;
+
+procedure TJObject.ForEach(Callback: TIJObjectForEach);
+begin
+  for var I := 0 to FList.Count-1 do
+    Callback(FList[I].Key, FList[I].Item.Copy);
 end;
 
 function TJObject.Format(Indentation: Integer; BaseIdent: integer): string;
@@ -840,17 +931,53 @@ end;
 
 function TJObject.GetKeyIndex(Key: string): Integer;
 var
-  I: Integer;
+  L, H, M, Cmp: Integer;
 begin
-  for I := 0 to Count-1 do
-    if Key = FList[I].Key then
-      Exit(I);
-  Exit(-1);
+  if FSortedKeys then begin
+    // Binary search
+    L := 0;
+    H := Count - 1;
+    while L <= H do
+    begin
+      M := (L + H) div 2;
+      Cmp := CompareStr(FList[M].Key, Key);
+      if Cmp = 0 then
+        Exit(M)
+      else if Cmp < 0 then
+        L := M + 1
+      else
+        H := M - 1;
+    end;
+    Exit(-1); // not found
+  end else begin
+    // Linear search
+    for Result := 0 to Count - 1 do
+      if FList[Result].Key = Key then
+        Exit;
+    Result := -1;
+  end;
+end;
+
+function TJObject.GetSorted: boolean;
+begin
+  Result := FSortedKeys;
 end;
 
 function TJObject.IsObject: Boolean;
 begin
   Result := true;
+end;
+
+function TJObject.KeyExists(Key: string; out Value: IJValue): boolean;
+var
+  Index: integer;
+begin
+  Index := GetKeyIndex(Key);
+  if Index <> -1 then begin
+    Result := true;
+    Value := FList[Index].Item.Copy;
+  end else
+    Result := false;
 end;
 
 function TJObject.KeyExists(Key: string): boolean;
@@ -882,6 +1009,50 @@ begin
   Remove( GetKeyIndex(Key) );
 end;
 
+procedure TJObject.Rename(Key, NewName: string);
+var
+  SourceIndex: integer;
+begin
+  if KeyExists(NewName) then
+    raise Exception.CreateFmt('A key with the name "%s" already exists.', [NewName]);
+
+  // Get key
+  SourceIndex := GetKeyIndex(Key);
+  FList.List[SourceIndex].Key := NewName;
+
+  if FSortedKeys then begin
+    // Move position
+    var DestIndex := SourceIndex;
+
+    // Down
+    while (DestIndex > 0) and (FList.List[DestIndex-1].Key > FList.List[SourceIndex].Key) do
+      Dec(DestIndex);
+
+    // Up
+    if DestIndex = SourceIndex then
+      while (DestIndex < FList.Count-1) and (FList.List[DestIndex+1].Key < FList.List[SourceIndex].Key) do
+        Inc(DestIndex);
+
+    // Move
+    FList.Move(SourceIndex, DestIndex);
+  end;
+end;
+
+procedure TJObject.SetSorted(const Value: boolean);
+begin
+  if FSortedKeys = Value then
+    Exit;
+  if Value then
+    Sort;
+  FSortedKeys := Value;
+end;
+
+procedure TJObject.Sort;
+begin
+  // Sort using the provided IComparer
+  FList.Sort;
+end;
+
 procedure TJObject.Remove(Index: integer);
 begin
   if (Index >= 0) and (Index < FList.Count) then begin
@@ -907,7 +1078,6 @@ end;
 procedure TJObject._addKey(Key: string; const Value: IJValue);
 var
   Obj: TPair;
-  InsertIndex: integer;
 begin
   const NewCopy = Value.Copy; NewCopy._AddRef; // create reference
 
@@ -915,14 +1085,17 @@ begin
   Obj.Item := NewCopy;
 
   try
-    // Get insert index
-    InsertIndex := FList.Count;
-    while (InsertIndex > 0)
-      and (Obj.Key < FList[InsertIndex-1].Key) do
-        Dec(InsertIndex);
+    if FSortedKeys then begin
+      // Get insert index
+      var InsertIndex := FList.Count;
+      while (InsertIndex > 0)
+        and (Obj.Key < FList[InsertIndex-1].Key) do
+          Dec(InsertIndex);
 
-    // Insert object
-    FList.Insert(InsertIndex, Obj);
+      // Insert object
+      FList.Insert(InsertIndex, Obj);
+    end else
+      FList.Add(Obj);
   finally
     Obj.Item := nil;
   end;
@@ -949,6 +1122,12 @@ begin
   FreeAndNil(FList);
 
   inherited;
+end;
+
+procedure TJArray.ForEach(Callback: TIJArrayForEach);
+begin
+  for var I := 0 to FList.Count-1 do
+    Callback(IJValue(FList[I]).Copy);
 end;
 
 function TJArray.Format(Indentation, BaseIdent: integer): string;
@@ -1122,6 +1301,11 @@ end;
 
 { TJInteger }
 
+function TJInteger.AsFloat: Extended;
+begin
+  Result := FValue;
+end;
+
 function TJInteger.AsInteger: {$IFDEF LARGEJNUM}int64{$ELSE}integer{$ENDIF};
 begin
   Result := FValue;
@@ -1141,6 +1325,11 @@ end;
 class function TJInteger.CreateNew(Value: string): TJInteger;
 begin
   Result := TJValue.CreateNew(Value) as TJInteger;
+end;
+
+function TJInteger.IsFloat: Boolean;
+begin
+  Result := true;
 end;
 
 function TJInteger.IsInteger: Boolean;
